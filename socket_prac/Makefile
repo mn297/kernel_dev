@@ -19,14 +19,20 @@ all: $(SERVER_TARGET) $(CLIENT_TARGET)
 
 # Build server
 $(SERVER_TARGET): $(SERVER_SRC)
+	@echo "Building server..."
 	$(CC) $(CFLAGS) -o $(SERVER_TARGET) $(SERVER_SRC)
+	@echo "Server built successfully."
 
 # Build client
 $(CLIENT_TARGET): $(CLIENT_SRC)
+	@echo "Building client..."
 	$(CC) $(CFLAGS) -o $(CLIENT_TARGET) $(CLIENT_SRC)
+	@echo "Client built successfully."
 
 # Clean up
 clean:
+	@echo "Cleaning up..."
 	rm -f $(SERVER_TARGET) $(CLIENT_TARGET)
+	@echo "Clean up done."
 
 .PHONY: all clean

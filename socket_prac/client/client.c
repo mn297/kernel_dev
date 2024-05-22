@@ -5,9 +5,17 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <time.h>
 
 #define SOCKET_PATH "/tmp/server.socket"
 #define BUFFER_SIZE 256
+
+void log_message(const char *message) {
+    time_t now = time(NULL);
+    char *time_str = ctime(&now);
+    time_str[strlen(time_str) - 1] = '\0'; // Remove newline
+    printf("[%s] %s\n", time_str, message);
+}
 
 void communicate_with_server(const char *message) {
     int client_fd;
@@ -31,6 +39,8 @@ void communicate_with_server(const char *message) {
         exit(EXIT_FAILURE);
     }
 
+    log_message("Connected to server.");
+
     // Send message to the server
     write(client_fd, message, strlen(message) + 1);
 
@@ -39,10 +49,11 @@ void communicate_with_server(const char *message) {
     int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
     if (bytes_read > 0) {
         buffer[bytes_read] = '\0';
-        printf("Received from server: %s\n", buffer);
+        log_message(buffer);
     }
 
     close(client_fd);
+    log_message("Disconnected from server.");
 }
 
 int main() {

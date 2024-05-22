@@ -6,9 +6,17 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <signal.h>
+#include <time.h>
 
 #define SOCKET_PATH "/tmp/server.socket"
 #define BUFFER_SIZE 256
+
+void log_message(const char *message) {
+    time_t now = time(NULL);
+    char *time_str = ctime(&now);
+    time_str[strlen(time_str) - 1] = '\0'; // Remove newline
+    printf("[%s] %s\n", time_str, message);
+}
 
 void handle_client(int client_fd) {
     char buffer[BUFFER_SIZE];
@@ -16,7 +24,7 @@ void handle_client(int client_fd) {
 
     while ((bytes_read = read(client_fd, buffer, sizeof(buffer) - 1)) > 0) {
         buffer[bytes_read] = '\0';
-        printf("Received from client: %s\n", buffer);
+        log_message(buffer);
 
         // Respond to client
         char response[BUFFER_SIZE];
@@ -29,7 +37,7 @@ void handle_client(int client_fd) {
     }
 
     close(client_fd);
-    printf("Client disconnected.\n");
+    log_message("Client disconnected.");
 }
 
 void cleanup() {
@@ -75,7 +83,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    printf("Server is waiting for connections...\n");
+    log_message("Server is waiting for connections...");
 
     // Accept and handle connections
     while (1) {
@@ -84,7 +92,7 @@ int main() {
             continue;
         }
 
-        printf("Client connected.\n");
+        log_message("Client connected.");
 
         if (fork() == 0) {
             close(server_fd);
