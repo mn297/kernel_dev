@@ -1,1 +1,1 @@
-/home/pritt3/Desktop/kern/hello-4.o
+/home/pritt3/Desktop/kern/kernel_dev/hello-4.o
