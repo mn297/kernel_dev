@@ -5,7 +5,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -pthread
 
 # Targets
-TARGETS = server client server2 server_bind server_bind_simple server_bind_epoll client_bind 
+TARGETS = server client server2 server_bind server_bind_simple server_bind_epoll client_bind client_bind_epoll_cb server_bind_epoll_cb
 
 all: clean $(TARGETS)
 
@@ -24,11 +24,17 @@ server_bind_simple: server_bind_simple.c
 server_bind_epoll: server_bind_epoll.c
 	$(CC) $(CFLAGS) -o server_bind_epoll.o server_bind_epoll.c
 
+server_bind_epoll_cb: server_bind_epoll_cb.c
+	$(CC) $(CFLAGS) -o server_bind_epoll_cb.o server_bind_epoll_cb.c
+
 client_bind: client_bind.c
 	$(CC) $(CFLAGS) -o client_bind.o client_bind.c
 
 client_bind_simple: client_bind_simple.c
 	$(CC) $(CFLAGS) -o client_bind_simple.o client_bind_simple.c
+
+client_bind_epoll_cb: client_bind_epoll_cb.c
+	$(CC) $(CFLAGS) -o client_bind_epoll_cb.o client_bind_epoll_cb.c
 
 client: client.c
 	$(CC) $(CFLAGS) -o client.o client.c

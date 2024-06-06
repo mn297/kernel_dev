@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #define SOCKET_PATH "/tmp/example.sock"
 #define MAX_EVENTS 10
@@ -17,8 +18,13 @@
 typedef void (*callback_t)(int fd, struct epoll_event *event);
 
 void handle_accept(int server_fd, struct epoll_event *event);
-void handle_client_read(int client_fd, struct epoll_event *event);
-void handle_client_write(int client_fd, struct epoll_event *event);
+void handle_read_from_client(int client_fd, struct epoll_event *event);
+void handle_write_to_client(int client_fd, struct epoll_event *event);
+
+void *event_loop(void *arg);
+
+int server_fd, epoll_fd;
+int client_fd = -1;
 
 struct epoll_event_data
 {
@@ -45,7 +51,13 @@ void handle_accept(int server_fd, struct epoll_event *event)
 {
     struct sockaddr_un addr;
     socklen_t addrlen = sizeof(addr);
-    int client_fd;
+    int ret;
+
+    if (client_fd != -1)
+    {
+        printf("Already accepted a connection, client_fd=%d\n", client_fd);
+        return;
+    }
 
     client_fd = accept(server_fd, (struct sockaddr *)&addr, &addrlen);
     if (client_fd == -1)
@@ -54,7 +66,7 @@ void handle_accept(int server_fd, struct epoll_event *event)
         return;
     }
 
-    printf("Accepted a new connection\n");
+    printf("Accepted a new connection, client_fd=%d\n", client_fd);
 
     // Set client socket to non-blocking
     set_nonblocking(client_fd);
@@ -63,22 +75,29 @@ void handle_accept(int server_fd, struct epoll_event *event)
     struct epoll_event ev;
     struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
     client_data->fd = client_fd;
-    client_data->callback = handle_client_read;
+    client_data->callback = handle_read_from_client;
 
     ev.events = EPOLLIN | EPOLLET;
     ev.data.ptr = client_data;
-    if (epoll_ctl(event->data.fd, EPOLL_CTL_ADD, client_fd, &ev) == -1)
+    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
+    if (ret < 0)
     {
-        perror("epoll_ctl");
+        perror("handle_accept() epoll_ctl() ret < 0");
         close(client_fd);
         free(client_data);
     }
 }
 
-void handle_client_read(int client_fd, struct epoll_event *event)
+void handle_read_from_client(int client_fd, struct epoll_event *event)
 {
     char buffer[BUFFER_SIZE];
     int ret;
+
+    // Check if client_fd is valid
+    if (client_fd == -1)
+    {
+        return;
+    }
 
     ret = read(client_fd, buffer, BUFFER_SIZE - 1);
     if (ret < 0)
@@ -87,48 +106,58 @@ void handle_client_read(int client_fd, struct epoll_event *event)
         {
             perror("read");
             close(client_fd);
-            epoll_ctl(event->data.fd, EPOLL_CTL_DEL, client_fd, NULL);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
             free(event->data.ptr);
         }
     }
     else if (ret == 0)
     {
         // Client disconnected
-        printf("Client disconnected\n");
         close(client_fd);
-        epoll_ctl(event->data.fd, EPOLL_CTL_DEL, client_fd, NULL);
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
         free(event->data.ptr);
+        printf("Client disconnected,client_fd=%d, setting to -1\n", client_fd);
+        client_fd = -1;
     }
     else
     {
         buffer[ret] = '\0';
-        printf("Received message: %s\n", buffer);
+        printf("Received from client: %s\n", buffer);
 
+        // What is this part for???
         // Prepare to write response
-        struct epoll_event ev;
-        struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
-        client_data->fd = client_fd;
-        client_data->callback = handle_client_write;
+        // struct epoll_event ev;
+        // struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
+        // client_data->fd = client_fd;
+        // client_data->callback = handle_write_to_client;
 
-        ev.events = EPOLLOUT | EPOLLET;
-        ev.data.ptr = client_data;
-        if (epoll_ctl(event->data.fd, EPOLL_CTL_MOD, client_fd, &ev) == -1)
-        {
-            perror("epoll_ctl");
-            close(client_fd);
-            free(client_data);
-        }
+        // ev.events = EPOLLOUT | EPOLLET;
+        // ev.data.ptr = client_data;
+        // ret = epoll_ctl(epoll_fd, EPOLL_CTL_MOD, client_fd, &ev);
+        // if (ret == -1)
+        // {
+        //     perror("epoll_ctl");
+        //     close(client_fd);
+        //     free(client_data);
+        // }
     }
 }
 
-void handle_client_write(int client_fd, struct epoll_event *event)
+// Not used at the moment. Need to implement socket pair.
+void handle_write_to_client(int client_fd, struct epoll_event *event)
 {
-    const char *msg = "Hello, client!";
+    const char *msg = "Hello, client! from handle_write_to_client()";
     int ret;
+
+    if (client_fd == -1)
+    {
+        return;
+    }
 
     ret = write(client_fd, msg, strlen(msg));
     if (ret < 0)
     {
+        printf("write() to client_fd%d failed\n", client_fd);
         perror("write");
         close(client_fd);
         epoll_ctl(event->data.fd, EPOLL_CTL_DEL, client_fd, NULL);
@@ -136,29 +165,29 @@ void handle_client_write(int client_fd, struct epoll_event *event)
     }
     else
     {
+        // USELESS???
         // Switch back to reading
-        struct epoll_event ev;
-        struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
-        client_data->fd = client_fd;
-        client_data->callback = handle_client_read;
+        // struct epoll_event ev;
+        // struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
+        // client_data->fd = client_fd;
+        // client_data->callback = handle_read_from_client;
 
-        ev.events = EPOLLIN | EPOLLET;
-        ev.data.ptr = client_data;
-        if (epoll_ctl(event->data.fd, EPOLL_CTL_MOD, client_fd, &ev) == -1)
-        {
-            perror("epoll_ctl");
-            close(client_fd);
-            free(client_data);
-        }
+        // ev.events = EPOLLIN | EPOLLET;
+        // ev.data.ptr = client_data;
+        // if (epoll_ctl(event->data.fd, EPOLL_CTL_MOD, client_fd, &ev) == -1)
+        // {
+        //     perror("epoll_ctl");
+        //     close(client_fd);
+        //     free(client_data);
+        // }
     }
 }
 
 int main()
 {
     struct sockaddr_un addr;
-    int server_fd, epoll_fd;
     int ret;
-    struct epoll_event ev, events[MAX_EVENTS];
+    struct epoll_event ev;
 
     // Create a UNIX domain socket
     server_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -206,7 +235,7 @@ int main()
     set_nonblocking(server_fd);
 
     // Create an epoll instance
-    epoll_fd = epoll_create1(0);
+    epoll_fd = epoll_create1(0 | EPOLL_CLOEXEC);
     if (epoll_fd == -1)
     {
         perror("epoll_create1");
@@ -216,7 +245,7 @@ int main()
 
     // Add server_fd to the epoll instance
     struct epoll_event_data *server_data = malloc(sizeof(struct epoll_event_data));
-    server_data->fd = epoll_fd;
+    server_data->fd = server_fd;
     server_data->callback = handle_accept;
 
     ev.events = EPOLLIN;
@@ -230,21 +259,33 @@ int main()
         exit(EXIT_FAILURE);
     }
 
+    // Epoll handler thread.
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, event_loop, &epoll_fd) != 0)
+    {
+        perror("pthread_create");
+        close(server_fd);
+        close(epoll_fd);
+        return EXIT_FAILURE;
+    }
+
+    // Send data to client
     while (1)
     {
-        int n_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        if (n_fds == -1)
+        sleep(0.5);
+        const char *msg = "Hello, client! from main()";
+        int ret;
+        if (client_fd == -1)
         {
-            perror("epoll_wait");
-            close(server_fd);
-            close(epoll_fd);
-            exit(EXIT_FAILURE);
+            continue;
         }
-
-        for (int i = 0; i < n_fds; i++)
+        ret = write(client_fd, msg, strlen(msg));
+        if (ret < 0)
         {
-            struct epoll_event_data *event_data = (struct epoll_event_data *)events[i].data.ptr;
-            event_data->callback(event_data->fd, &events[i]);
+            perror("write");
+            close(client_fd);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+            free(server_data);
         }
     }
 
@@ -258,4 +299,27 @@ int main()
     unlink(SOCKET_PATH);
 
     return 0;
+}
+
+void *event_loop(void *arg)
+{
+    int epoll_fd = *(int *)arg;
+    struct epoll_event events[MAX_EVENTS];
+
+    while (1)
+    {
+        int n_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        if (n_fds == -1)
+        {
+            perror("epoll_wait");
+            close(epoll_fd);
+            pthread_exit(NULL);
+        }
+
+        for (int i = 0; i < n_fds; i++)
+        {
+            struct epoll_event_data *event_data = (struct epoll_event_data *)events[i].data.ptr;
+            event_data->callback(event_data->fd, &events[i]);
+        }
+    }
 }
