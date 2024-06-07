@@ -29,6 +29,7 @@ void *event_loop(void *arg);
 
 int server_fd, epoll_fd;
 int client_fd = -1;
+pthread_mutex_t client_fd_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct epoll_event_data
 {
@@ -55,84 +56,89 @@ void handle_accept(int server_fd, struct epoll_event *event)
 {
     struct sockaddr_un addr;
     socklen_t addrlen = sizeof(addr);
-    int ret;
+    int new_client_fd;
 
-    if (client_fd != -1)
-    {
-        printf("Already accepted a connection, client_fd=%d\n", client_fd);
-        return;
-    }
-
-    client_fd = accept(server_fd, (struct sockaddr *)&addr, &addrlen);
-    if (client_fd == -1)
+    new_client_fd = accept(server_fd, (struct sockaddr *)&addr, &addrlen);
+    if (new_client_fd == -1)
     {
         perror("accept");
         return;
     }
 
-    printf("Accepted a new connection, client_fd=%d\n", client_fd);
+    printf("Accepted a new connection, new_client_fd=%d\n", new_client_fd);
 
     // Set client socket to non-blocking
-    set_nonblocking(client_fd);
+    set_nonblocking(new_client_fd);
 
     // Add the new client_fd to the epoll instance
     struct epoll_event ev;
     struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
-    client_data->fd = client_fd;
+    client_data->fd = new_client_fd;
     client_data->callback = handle_read_from_client;
 
     ev.events = EPOLLIN | EPOLLET;
     ev.data.ptr = client_data;
-    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
-    if (ret < 0)
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client_fd, &ev) == -1)
     {
-        perror("handle_accept() epoll_ctl() ret < 0");
-        close(client_fd);
+        perror("handle_accept() epoll_ctl() failed");
+        close(new_client_fd);
         free(client_data);
+    }
+    else
+    {
+        // Properly close and cleanup the previous client connection if exists
+        pthread_mutex_lock(&client_fd_mutex);
+        if (client_fd != -1)
+        {
+            close(client_fd);
+            printf("Closed previous client connection, client_fd=%d\n", client_fd);
+        }
+        client_fd = new_client_fd; // Update the global client_fd
+        pthread_mutex_unlock(&client_fd_mutex);
     }
 }
 
-void handle_read_from_client(int client_fd, struct epoll_event *event)
+void handle_read_from_client(int fd, struct epoll_event *event)
 {
     char buffer[BUFFER_SIZE];
     int ret;
 
-    // Check if client_fd is valid
-    if (client_fd == -1)
+    if (fd == -1)
     {
         return;
     }
 
-    ret = read(client_fd, buffer, BUFFER_SIZE - 1);
+    ret = read(fd, buffer, BUFFER_SIZE - 1);
     if (ret < 0)
     {
         int err = errno;
         const char *description;
         const char *name = errno_to_name(err, &description);
         printf("read() from client_fd=%d failed, errno=%s=%d=%s=%s\n",
-               client_fd, name, err, description, strerror(errno));
+               fd, name, err, description, strerror(errno));
         if (err != EAGAIN)
         {
             perror("read");
-            close(client_fd);
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+            close(fd);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
             free(event->data.ptr);
-            client_fd = -1;
+            pthread_mutex_lock(&client_fd_mutex);
+            if (fd == client_fd)
+                client_fd = -1;
+            pthread_mutex_unlock(&client_fd_mutex);
         }
     }
     else if (ret == 0)
     {
-        int err = errno;
-        const char *description;
-        const char *name = errno_to_name(err, &description);
-        printf("read() from client_fd=%d failed, errno=%s=%d=%s=%s\n",
-               client_fd, name, err, description, strerror(errno));
         // Client disconnected
-        printf("Client disconnected, client_fd=%d\n", client_fd);
-        close(client_fd);
-        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+        printf("Client disconnected, client_fd=%d\n", fd);
+        close(fd);
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
         free(event->data.ptr);
-        client_fd = -1; // Note: This doesn't affect the caller's client_fd variable
+        pthread_mutex_lock(&client_fd_mutex);
+        if (fd == client_fd)
+            client_fd = -1;
+        pthread_mutex_unlock(&client_fd_mutex);
     }
     else
     {
@@ -300,13 +306,17 @@ int main()
         int ret;
         sleep(0.5);
 
-        if (client_fd == -1)
+        pthread_mutex_lock(&client_fd_mutex);
+        int fd_to_write = client_fd;
+        pthread_mutex_unlock(&client_fd_mutex);
+
+        if (fd_to_write == -1)
         {
-            printf("No client connected, client_fd=%d\n", client_fd);
+            printf("No client connected\n");
             continue;
         }
 
-        ret = write(client_fd, msg, strlen(msg));
+        ret = write(fd_to_write, msg, strlen(msg));
 
         // Industry standard if-else-if block for SOCK_SEQPACKET, checking everything including different errno flags combinations.
         if (ret < 0)
@@ -315,7 +325,7 @@ int main()
             const char *description;
             const char *name = errno_to_name(err, &description);
             printf("write() to client_fd=%d failed, errno=%s=%d=%s=%s\n",
-                   client_fd, name, err, description, strerror(errno));
+                   fd_to_write, name, err, description, strerror(errno));
             if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
                 printf("errno=%s\n", strerror(errno));
@@ -325,10 +335,12 @@ int main()
             {
                 printf("errno=%s\n", strerror(errno));
                 perror("write");
-                close(client_fd);
-                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-                free(server_data);
-                client_fd = -1;
+                close(fd_to_write);
+                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd_to_write, NULL);
+                pthread_mutex_lock(&client_fd_mutex);
+                if (fd_to_write == client_fd)
+                    client_fd = -1;
+                pthread_mutex_unlock(&client_fd_mutex);
             }
         }
         else if (ret == 0)
@@ -337,16 +349,18 @@ int main()
             const char *description;
             const char *name = errno_to_name(err, &description);
             printf("write() to client_fd=%d failed, errno=%s=%d=%s=%s\n",
-                   client_fd, name, err, description, strerror(errno));
+                   fd_to_write, name, err, description, strerror(errno));
 
-            close(client_fd);
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-            free(server_data);
-            client_fd = -1;
+            close(fd_to_write);
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd_to_write, NULL);
+            pthread_mutex_lock(&client_fd_mutex);
+            if (fd_to_write == client_fd)
+                client_fd = -1;
+            pthread_mutex_unlock(&client_fd_mutex);
         }
         else
         {
-            printf("write() to client_fd=%d succeeded\n", client_fd);
+            printf("write() to client_fd=%d succeeded\n", fd_to_write);
         }
     }
 
