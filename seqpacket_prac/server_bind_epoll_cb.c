@@ -304,7 +304,7 @@ int main()
     while (1)
     {
         int ret;
-        sleep(0.5);
+        sleep(2);
 
         pthread_mutex_lock(&client_fd_mutex);
         int fd_to_write = client_fd;

@@ -24,6 +24,7 @@ struct epoll_event_data
 };
 
 int sock_fd, epoll_fd;
+pthread_mutex_t sock_fd_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void set_nonblocking(int fd)
 {
@@ -73,8 +74,9 @@ void add_to_epoll(int epoll_fd, int fd, callback_t callback)
 
     ev.events = EPOLLIN | EPOLLET;
     ev.data.ptr = data;
+    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
 
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1)
+    if (ret == -1)
     {
         perror("epoll_ctl");
         close(fd);
@@ -103,6 +105,23 @@ void *epoll_thread_func(void *arg)
             struct epoll_event_data *event_data = (struct epoll_event_data *)events[i].data.ptr;
             event_data->callback(event_data->fd, &events[i]);
         }
+    }
+}
+
+void write_to_server(const char *msg)
+{
+    pthread_mutex_lock(&sock_fd_mutex);
+    int ret = write(sock_fd, msg, strlen(msg));
+    pthread_mutex_unlock(&sock_fd_mutex);
+
+    if (ret < 0)
+    {
+        perror("write");
+        // Handle write errors if necessary
+    }
+    else
+    {
+        printf("write_to_server() %s\n", msg);
     }
 }
 
@@ -158,6 +177,13 @@ int main()
         exit(EXIT_FAILURE);
     }
 
+    // Example of sending messages to the server
+    const char *msg = "Hello, server!";
+    while (1)
+    {
+        sleep(2);
+        write_to_server(msg);
+    }
     pthread_join(epoll_thread, NULL); // Optionally wait for the thread to finish
 
     // Cleanup (unreachable code in normal execution)
