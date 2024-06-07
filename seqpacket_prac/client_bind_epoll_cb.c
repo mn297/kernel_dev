@@ -23,6 +23,8 @@ struct epoll_event_data
     callback_t callback;
 };
 
+int sock_fd, epoll_fd;
+
 void set_nonblocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -41,17 +43,19 @@ void set_nonblocking(int fd)
 void handle_from_server(int fd, struct epoll_event *event)
 {
     char buffer[BUFFER_SIZE];
-    int count = read(fd, buffer, BUFFER_SIZE - 1);
-    if (count > 0)
+    int ret;
+
+    ret = read(fd, buffer, BUFFER_SIZE - 1);
+    if (ret > 0)
     {
-        buffer[count] = '\0';
+        buffer[ret] = '\0';
         printf("Received from server: %s\n", buffer);
     }
-    else if (count == 0 || (count < 0 && errno != EAGAIN))
+    else if (ret == 0 || (ret < 0 && errno != EAGAIN))
     {
         // Server closed connection or read error
         printf("Server closed connection or error occurred\n");
-        epoll_ctl(event->data.fd, EPOLL_CTL_DEL, fd, NULL);
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
         close(fd);
         free(event->data.ptr);
         pthread_exit(NULL); // Exit the thread on a critical error or server disconnect
@@ -62,6 +66,8 @@ void add_to_epoll(int epoll_fd, int fd, callback_t callback)
 {
     struct epoll_event ev;
     struct epoll_event_data *data = malloc(sizeof(struct epoll_event_data));
+    int ret;
+
     data->fd = fd;
     data->callback = callback;
 
@@ -102,7 +108,6 @@ void *epoll_thread_func(void *arg)
 
 int main()
 {
-    int sock_fd, epoll_fd;
     struct sockaddr_un addr;
     pthread_t epoll_thread;
     int ret;

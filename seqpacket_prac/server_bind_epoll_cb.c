@@ -9,7 +9,11 @@
 #include <errno.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <execinfo.h>
 #include <pthread.h>
+
+#include "errno_helpers.h"
 
 #define SOCKET_PATH "/tmp/example.sock"
 #define MAX_EVENTS 10
@@ -102,7 +106,12 @@ void handle_read_from_client(int client_fd, struct epoll_event *event)
     ret = read(client_fd, buffer, BUFFER_SIZE - 1);
     if (ret < 0)
     {
-        if (errno != EAGAIN)
+        int err = errno;
+        const char *description;
+        const char *name = errno_to_name(err, &description);
+        printf("read() from client_fd=%d failed, errno=%s=%d=%s=%s\n",
+               client_fd, name, err, description, strerror(errno));
+        if (err != EAGAIN)
         {
             perror("read");
             close(client_fd);
@@ -112,34 +121,22 @@ void handle_read_from_client(int client_fd, struct epoll_event *event)
     }
     else if (ret == 0)
     {
+        int err = errno;
+        const char *description;
+        const char *name = errno_to_name(err, &description);
+        printf("read() from client_fd=%d failed, errno=%s=%d=%s=%s\n",
+               client_fd, name, err, description, strerror(errno));
         // Client disconnected
+        printf("Client disconnected, client_fd=%d\n", client_fd);
         close(client_fd);
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
         free(event->data.ptr);
-        printf("Client disconnected,client_fd=%d, setting to -1\n", client_fd);
-        client_fd = -1;
+        client_fd = -1; // Note: This doesn't affect the caller's client_fd variable
     }
     else
     {
         buffer[ret] = '\0';
         printf("Received from client: %s\n", buffer);
-
-        // What is this part for???
-        // Prepare to write response
-        // struct epoll_event ev;
-        // struct epoll_event_data *client_data = malloc(sizeof(struct epoll_event_data));
-        // client_data->fd = client_fd;
-        // client_data->callback = handle_write_to_client;
-
-        // ev.events = EPOLLOUT | EPOLLET;
-        // ev.data.ptr = client_data;
-        // ret = epoll_ctl(epoll_fd, EPOLL_CTL_MOD, client_fd, &ev);
-        // if (ret == -1)
-        // {
-        //     perror("epoll_ctl");
-        //     close(client_fd);
-        //     free(client_data);
-        // }
     }
 }
 
@@ -183,11 +180,37 @@ void handle_write_to_client(int client_fd, struct epoll_event *event)
     }
 }
 
+// Function to handle SIGSEGV
+void handle_sigsegv(int sig)
+{
+    void *array[10];
+    size_t size;
+
+    printf("Caught signal %d (%s)\n", sig, strsignal(sig));
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array, 10);
+
+    // print out all the frames to stderr
+    fprintf(stderr, "Error: signal %d:\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    exit(1);
+    // You can place a breakpoint here to debug
+    exit(EXIT_FAILURE);
+}
+
 int main()
 {
     struct sockaddr_un addr;
     int ret;
     struct epoll_event ev;
+
+    // Register the SIGSEGV handler
+    if (signal(SIGSEGV, handle_sigsegv) == SIG_ERR)
+    {
+        perror("signal");
+        return EXIT_FAILURE;
+    }
 
     // Create a UNIX domain socket
     server_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -270,22 +293,58 @@ int main()
     }
 
     // Send data to client
+    const char *msg = "Hello, client! from main()";
     while (1)
     {
-        sleep(0.5);
-        const char *msg = "Hello, client! from main()";
         int ret;
+        sleep(0.5);
+
         if (client_fd == -1)
         {
+            printf("No client connected, client_fd=%d\n", client_fd);
             continue;
         }
+
         ret = write(client_fd, msg, strlen(msg));
+
+        // Industry standard if-else-if block for SOCK_SEQPACKET, checking everything including different errno flags combinations.
         if (ret < 0)
         {
-            perror("write");
+            int err = errno;
+            const char *description;
+            const char *name = errno_to_name(err, &description);
+            printf("write() to client_fd=%d failed, errno=%s=%d=%s=%s\n",
+                   client_fd, name, err, description, strerror(errno));
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                printf("errno=%s\n", strerror(errno));
+                continue;
+            }
+            else
+            {
+                printf("errno=%s\n", strerror(errno));
+                perror("write");
+                close(client_fd);
+                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+                free(server_data);
+            }
+        }
+        else if (ret == 0)
+        {
+            int err = errno;
+            const char *description;
+            const char *name = errno_to_name(err, &description);
+            printf("write() to client_fd=%d failed, errno=%s=%d=%s=%s\n",
+                   client_fd, name, err, description, strerror(errno));
+
             close(client_fd);
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
             free(server_data);
+            client_fd = -1;
+        }
+        else
+        {
+            printf("write() to client_fd%d succeeded\n", client_fd);
         }
     }
 
