@@ -117,6 +117,7 @@ void handle_read_from_client(int client_fd, struct epoll_event *event)
             close(client_fd);
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
             free(event->data.ptr);
+            client_fd = -1;
         }
     }
     else if (ret == 0)
@@ -327,6 +328,7 @@ int main()
                 close(client_fd);
                 epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
                 free(server_data);
+                client_fd = -1;
             }
         }
         else if (ret == 0)
@@ -344,7 +346,7 @@ int main()
         }
         else
         {
-            printf("write() to client_fd%d succeeded\n", client_fd);
+            printf("write() to client_fd=%d succeeded\n", client_fd);
         }
     }
 
