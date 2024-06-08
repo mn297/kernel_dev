@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "errno_helpers.h": "c",
+        "errno.h": "c"
+    }
+}

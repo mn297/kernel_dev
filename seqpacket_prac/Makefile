@@ -1,46 +1,43 @@
-
-
-# Makefile for building server
+# Makefile for building server and client applications
+# Compiler to use
 CC = gcc
+
+# Compiler flags for warnings, C standard, and pthread support
 CFLAGS = -Wall -Wextra -std=c11 -pthread
 
-# Targets
-TARGETS = server client server2 server_bind server_bind_simple server_bind_epoll client_bind client_bind_epoll_cb server_bind_epoll_cb
+# Source files
+SOURCES = \
+    server.c \
+    client.c \
+    server2.c \
+    server_bind.c \
+    server_bind_simple.c \
+    server_bind_epoll.c \
+    server_bind_epoll_cb.c \
+    client_bind.c \
+    client_bind_simple.c \
+    client_bind_epoll_cb.c
 
-all: clean $(TARGETS)
+# Executable files
+# This line creates a list of executables by substituting .c with .o in the SOURCES list
+EXECUTABLES = $(SOURCES:.c=.o)
 
-server: server.c
-	$(CC) $(CFLAGS) -o server.o server.c
+# The 'all' target depends on all executables defined in EXECUTABLES
+all: $(EXECUTABLES)
 
-server2: server2.c
-	$(CC) $(CFLAGS) -o server2.o server2.c
+# Pattern rule for compiling source files into executables with .o extension
+# %.o: %.c is a pattern rule. It tells Make how to create a .o file from a .c file.
+# % is a wildcard that matches any stem. In this context, it means that any .c file 
+# can be transformed into a .o file using the specified recipe.
+# $(CC) $(CFLAGS) -o $@ $< compiles the .c file into an executable with a .o extension.
+# $@ represents the target file of the rule (the .o file).
+# $< represents the first prerequisite (the .c file).
+%.o: %.c
+	$(CC) $(CFLAGS) -o $@ $<
 
-server_bind: server_bind.c
-	$(CC) $(CFLAGS) -o server_bind.o server_bind.c
-
-server_bind_simple: server_bind_simple.c
-	$(CC) $(CFLAGS) -o server_bind_simple.o server_bind_simple.c
-
-server_bind_epoll: server_bind_epoll.c
-	$(CC) $(CFLAGS) -o server_bind_epoll.o server_bind_epoll.c
-
-server_bind_epoll_cb: server_bind_epoll_cb.c
-	$(CC) $(CFLAGS) -o server_bind_epoll_cb.o server_bind_epoll_cb.c
-
-client_bind: client_bind.c
-	$(CC) $(CFLAGS) -o client_bind.o client_bind.c
-
-client_bind_simple: client_bind_simple.c
-	$(CC) $(CFLAGS) -o client_bind_simple.o client_bind_simple.c
-
-client_bind_epoll_cb: client_bind_epoll_cb.c
-	$(CC) $(CFLAGS) -o client_bind_epoll_cb.o client_bind_epoll_cb.c
-
-client: client.c
-	$(CC) $(CFLAGS) -o client.o client.c
-
+# The 'clean' target removes all compiled executables
 clean:
-	rm -f $(TARGETS)
+	rm -f $(EXECUTABLES)
 
+# Declares 'all' and 'clean' as phony targets
 .PHONY: all clean
-

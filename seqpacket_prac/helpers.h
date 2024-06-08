@@ -4,6 +4,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#define SOCKET_PATH "/tmp/example.sock"
+#define MAX_EVENTS 10
+#define BUFFER_SIZE 256
+
 typedef struct
 {
     int errnum;
@@ -131,4 +135,34 @@ const char *errno_to_name(int err, const char **description)
         *description = "Unknown error";
     }
     return "UNKNOWN_ERRNO";
+}
+
+long get_inode(int fd)
+{
+    struct stat statbuf;
+    if (fstat(fd, &statbuf) == -1)
+    {
+        perror("fstat");
+        exit(EXIT_FAILURE);
+    }
+    // printf("Inode number: %ld\n", (long)statbuf.st_ino);
+    return (long)statbuf.st_ino;
+}
+
+void get_socket_info()
+{
+    printf("=== Socket Information ===\n");
+    char command[BUFFER_SIZE];
+
+    // Get the socket details using lsof
+    snprintf(command, sizeof(command), "lsof -U | grep %s", SOCKET_PATH);
+    printf("Running command: %s\n", command);
+    system(command);
+
+    // Get the socket details using ss
+    snprintf(command, sizeof(command), "ss -xl | grep %s", SOCKET_PATH);
+    printf("Running command: %s\n", command);
+    system(command);
+
+    printf("==========================\n");
 }

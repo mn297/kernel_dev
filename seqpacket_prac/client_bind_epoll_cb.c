@@ -1,19 +1,30 @@
 #define _GNU_SOURCE
 
+// Standard library headers
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+
+// System headers for sockets and Unix domain sockets
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <errno.h>
+#include <sys/stat.h>
+
+// System headers for epoll
 #include <sys/epoll.h>
-#include <fcntl.h>
-#include <string.h>
+
+// Headers for signal handling and backtrace
+#include <signal.h>
+#include <execinfo.h>
+
+// Headers for threading
 #include <pthread.h>
 
-#define SOCKET_PATH "/tmp/example.sock"
-#define MAX_EVENTS 10
-#define BUFFER_SIZE 256
+// Custom header for helpers
+#include "helpers.h"
 
 typedef void (*callback_t)(int fd, struct epoll_event *event);
 
@@ -23,6 +34,7 @@ struct epoll_event_data
     callback_t callback;
 };
 
+struct sockaddr_un addr;
 int sock_fd, epoll_fd;
 pthread_mutex_t sock_fd_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -45,17 +57,21 @@ void handle_from_server(int fd, struct epoll_event *event)
 {
     char buffer[BUFFER_SIZE];
     int ret;
+    int fd_inode = get_inode(fd);
+
+    printf("handle_from_server()\n");
+    printf("    fd=%d, inode=%d\n", fd, fd_inode);
 
     ret = read(fd, buffer, BUFFER_SIZE - 1);
     if (ret > 0)
     {
         buffer[ret] = '\0';
-        printf("Received from server: %s\n", buffer);
+        printf("    received=%s\n", buffer);
     }
     else if (ret == 0 || (ret < 0 && errno != EAGAIN))
     {
         // Server closed connection or read error
-        printf("Server closed connection or error occurred\n");
+        printf("    server closed connection or error occurred\n");
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
         close(fd);
         free(event->data.ptr);
@@ -110,26 +126,33 @@ void *epoll_thread_func(void *arg)
 
 void write_to_server(const char *msg)
 {
+    printf("write_to_server()\n");
+    int ret;
+    if (sock_fd == -1)
+    {
+        printf("    Socket is closed\n");
+        return;
+    }
+
     pthread_mutex_lock(&sock_fd_mutex);
-    int ret = write(sock_fd, msg, strlen(msg));
+    ret = write(sock_fd, msg, strlen(msg));
     pthread_mutex_unlock(&sock_fd_mutex);
 
     if (ret < 0)
     {
         perror("write");
-        // Handle write errors if necessary
+        close(sock_fd);
     }
     else
     {
-        printf("write_to_server() %s\n", msg);
+        printf("    sent=%s\n", msg);
     }
 }
 
-int main()
+void connect_to_server()
 {
-    struct sockaddr_un addr;
-    pthread_t epoll_thread;
     int ret;
+    printf("connect_to_server()\n");
 
     // Create client socket
     sock_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -139,9 +162,6 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    // Set socket to non-blocking
-    set_nonblocking(sock_fd);
-
     // Setup address structure
     memset(&addr, 0, sizeof(struct sockaddr_un));
     addr.sun_family = AF_UNIX;
@@ -149,12 +169,25 @@ int main()
 
     // Connect to server
     ret = connect(sock_fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un));
+    // get_socket_info();
+
     if (ret == -1)
     {
         perror("connect");
         close(sock_fd);
         exit(EXIT_FAILURE);
     }
+}
+
+int main()
+{
+    pthread_t epoll_thread;
+    int ret;
+
+    // Set socket to non-blocking
+    set_nonblocking(sock_fd);
+
+    connect_to_server();
 
     // Create epoll instance
     epoll_fd = epoll_create1(0);
@@ -181,8 +214,16 @@ int main()
     const char *msg = "Hello, server!";
     while (1)
     {
-        sleep(2);
+        // 0.9 second delay
+        usleep(0.9 * 1000000);
         write_to_server(msg);
+
+        // Reconnect to server if connection is closed
+        if (errno)
+        {
+            connect_to_server();
+        }
+        errno = 0;
     }
     pthread_join(epoll_thread, NULL); // Optionally wait for the thread to finish
 
