@@ -117,6 +117,7 @@ const errno_entry errno_list[] = {
     {EXDEV, "EXDEV", "Cross-device link"},
     {0, NULL, NULL} // Sentinel value to mark end of array
 };
+
 const char *errno_to_name(int err, const char **description)
 {
     for (const errno_entry *entry = errno_list; entry->name != NULL; ++entry)
