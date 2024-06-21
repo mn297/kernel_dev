@@ -1,6 +1,9 @@
 {
     "files.associations": {
+        "*.yml": "yaml",
         "errno_helpers.h": "c",
-        "errno.h": "c"
+        "errno.h": "c",
+        "stat.h": "c",
+        "termios.h": "c"
     }
 }
