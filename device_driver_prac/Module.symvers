@@ -1,0 +1,3 @@
+0x78a57034	dummy_driver_write	/home/pritt3/kernel_dev/device_driver_prac/device_driver_dummy	EXPORT_SYMBOL	
+0xa82fda1d	dummy_driver_read	/home/pritt3/kernel_dev/device_driver_prac/device_driver_dummy	EXPORT_SYMBOL	
+0x8c1a09ac	dummy_driver_poll	/home/pritt3/kernel_dev/device_driver_prac/device_driver_dummy	EXPORT_SYMBOL	

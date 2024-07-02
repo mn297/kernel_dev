@@ -4,6 +4,7 @@
         "errno_helpers.h": "c",
         "errno.h": "c",
         "stat.h": "c",
-        "termios.h": "c"
+        "termios.h": "c",
+        "device_driver_dummy.h": "c"
     }
 }
