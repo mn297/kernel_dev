@@ -21,8 +21,6 @@ static int front = 0;
 static int rear = -1;
 static int count = 0;
 
-static struct device_driver dummy_driver;
-
 static struct mutex queue_lock;
 static DECLARE_WAIT_QUEUE_HEAD(queue_wq);
 
@@ -100,6 +98,31 @@ unsigned int dummy_driver_poll(struct file *file, poll_table *wait)
 }
 EXPORT_SYMBOL(dummy_driver_poll);
 
+// Platform driver probe function
+static int dummy_probe(struct platform_device *pdev)
+{
+    printk(KERN_INFO "Dummy driver probed\n");
+    return 0;
+}
+
+// Platform driver remove function
+static int dummy_remove(struct platform_device *pdev)
+{
+    printk(KERN_INFO "Dummy driver removed\n");
+    return 0;
+}
+
+// static struct device_driver dummy_driver;
+
+static struct platform_driver dummy_driver = {
+    .probe = dummy_probe,
+    .remove = dummy_remove,
+    .driver = {
+        .name = DEVICE_NAME,
+        .owner = THIS_MODULE,
+    },
+};
+
 // Driver registration function
 static int __init dummy_driver_init(void)
 {
@@ -107,11 +130,12 @@ static int __init dummy_driver_init(void)
 
     mutex_init(&queue_lock);
 
-    dummy_driver.name = DEVICE_NAME;
-    dummy_driver.bus = &platform_bus_type;
-    dummy_driver.owner = THIS_MODULE;
+    // dummy_driver.name = DEVICE_NAME;
+    // dummy_driver.bus = &platform_bus_type;
+    // dummy_driver.owner = THIS_MODULE;
+    // ret = driver_register(&dummy_driver);
 
-    ret = driver_register(&dummy_driver);
+    ret = platform_driver_register(&dummy_driver);
     if (ret < 0)
     {
         printk(KERN_ALERT "Failed to register dummy driver\n");
@@ -125,7 +149,8 @@ static int __init dummy_driver_init(void)
 // Driver unregistration function
 static void __exit dummy_driver_exit(void)
 {
-    driver_unregister(&dummy_driver);
+    // driver_unregister(&dummy_driver);
+    platform_driver_unregister(&dummy_driver);
     printk(KERN_INFO "Dummy driver unregistered\n");
 }
 
